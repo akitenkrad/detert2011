@@ -1,0 +1,13 @@
+[project]
+name = "detert2011-workspace"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "detert-tools",
+]
+
+[tool.uv.workspace]
+members = ["tools"]
+
+[tool.uv.sources]
+detert-tools = { workspace = true }

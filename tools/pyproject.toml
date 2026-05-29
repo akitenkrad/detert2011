@@ -1,0 +1,28 @@
+[project]
+name = "detert-tools"
+version = "0.1.0"
+description = "Detert & Edmondson (2011) Implicit Voice Theories — visualization, sweep analysis, and reproduction tools"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pillow>=10.0",
+    "scipy>=1.11",
+    "socsim-tools",
+    # CFA-style fit-index reproduction from the ABM rule-firing matrix.
+    "factor-analyzer>=0.5",
+]
+
+[project.scripts]
+detert-tools = "detert_tools.cli:main"
+
+[tool.uv.sources]
+socsim-tools = { git = "https://github.com/akitenkrad/rs-social-simulation-tools", subdirectory = "tools/socsim_tools" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/detert_tools"]

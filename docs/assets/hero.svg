@@ -1,0 +1,106 @@
+<!-- detert2011 hero. Vault SVG style contract (palette + dark mode). -->
+<svg width="100%" viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Detert &amp; Edmondson (2011) — Implicit Voice Theories</title>
+<desc>On a Watts–Strogatz organisational hierarchy network each employee chooses VOICE or SILENCE. Before deciding they reflect on five Implicit Voice Theory rules — target identification, need solid data, don't bypass, don't embarrass the boss, negative career consequences — shown as five facets feeding the decision. Node colours mark VOICE versus SILENCE.</desc>
+<style>
+  .t  { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 14px; fill: #2C2C2A; }
+  .ts { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 13px; fill: #444441; }
+  .tl { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 12px; font-weight: 600; fill: #534AB7; letter-spacing: 2px; }
+  .title { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 28px; font-weight: 600; fill: #2C2C2A; }
+  .glab { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 11px; font-weight: 500; fill: #888780; letter-spacing: 0.5px; }
+  .rlab { font-family: -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif; font-size: 10px; fill: #534AB7; }
+  .edge  { stroke: #C7C5BD; stroke-width: 1.2; opacity: 0.75; }
+  .chord { stroke: #534AB7; stroke-width: 1.2; opacity: 0.4; stroke-dasharray: 3 3; }
+  .rule  { stroke: #B5546A; stroke-width: 1.1; opacity: 0.55; stroke-dasharray: 2 2; }
+  .node  { stroke: #FAFAF8; stroke-width: 1.5; }
+  .nSIL  { fill: #534AB7; }
+  .nVOICE { fill: #FAFAF8; stroke: #F4A259; stroke-width: 2.2; }
+  .facet { fill: #B5546A; stroke: #FAFAF8; stroke-width: 1.2; }
+  @media (prefers-color-scheme: dark) {
+    .t  { fill: #E5E5E2; }
+    .ts { fill: #C7C5BD; }
+    .tl { fill: #AFA9EC; }
+    .title { fill: #E5E5E2; }
+    .glab { fill: #8C8B85; }
+    .rlab { fill: #AFA9EC; }
+    .edge  { stroke: #5F5E5A; }
+    .chord { stroke: #AFA9EC; }
+    .rule  { stroke: #E07A92; }
+    .node  { stroke: #211F1C; }
+    .nSIL  { fill: #AFA9EC; }
+    .nVOICE { fill: #211F1C; stroke: #FFB86B; }
+    .facet { fill: #E07A92; stroke: #211F1C; }
+  }
+</style>
+
+<!-- left: label + title -->
+<text x="40" y="58" class="tl">GENERATIVE ABM · IMPLICIT VOICE THEORIES</text>
+<text x="40" y="94" class="title">Implicit Voice</text>
+<text x="40" y="126" class="title">Theories</text>
+<text x="40" y="160" class="ts">Detert &amp; Edmondson (2011)</text>
+<text x="40" y="184" class="t">VOICE_i ~ Bernoulli( σ(β·x_i − β_ι·ι_i) )</text>
+<text x="40" y="208" class="glab">5 IVT rules reflected on at decision time</text>
+<text x="40" y="232" class="glab">on a Watts–Strogatz org hierarchy network</text>
+
+<!-- centre: 5 IVT reflection facets feeding the decision -->
+<g>
+  <circle class="facet" cx="470" cy="78"  r="6"/>
+  <circle class="facet" cx="470" cy="118" r="6"/>
+  <circle class="facet" cx="470" cy="158" r="6"/>
+  <circle class="facet" cx="470" cy="198" r="6"/>
+  <circle class="facet" cx="470" cy="238" r="6"/>
+  <text x="484" y="82"  class="rlab">target-id</text>
+  <text x="484" y="122" class="rlab">need-data</text>
+  <text x="484" y="162" class="rlab">no-bypass</text>
+  <text x="484" y="202" class="rlab">no-embarrass</text>
+  <text x="484" y="242" class="rlab">career-consequences</text>
+  <!-- facets feed the decision hub -->
+  <line class="rule" x1="476" y1="78"  x2="595" y2="155"/>
+  <line class="rule" x1="476" y1="118" x2="595" y2="155"/>
+  <line class="rule" x1="476" y1="158" x2="595" y2="155"/>
+  <line class="rule" x1="476" y1="198" x2="595" y2="155"/>
+  <line class="rule" x1="476" y1="238" x2="595" y2="155"/>
+</g>
+
+<!-- right: Watts–Strogatz ring network, nodes coloured by VOICE/SILENCE -->
+<g>
+  <line class="edge" x1="690.0" y1="60.0"  x2="737.5" y2="72.7"/>
+  <line class="edge" x1="737.5" y1="72.7"  x2="772.3" y2="107.5"/>
+  <line class="edge" x1="772.3" y1="107.5" x2="785.0" y2="155.0"/>
+  <line class="edge" x1="785.0" y1="155.0" x2="772.3" y2="202.5"/>
+  <line class="edge" x1="772.3" y1="202.5" x2="737.5" y2="237.3"/>
+  <line class="edge" x1="737.5" y1="237.3" x2="690.0" y2="250.0"/>
+  <line class="edge" x1="690.0" y1="250.0" x2="642.5" y2="237.3"/>
+  <line class="edge" x1="642.5" y1="237.3" x2="607.7" y2="202.5"/>
+  <line class="edge" x1="607.7" y1="202.5" x2="595.0" y2="155.0"/>
+  <line class="edge" x1="595.0" y1="155.0" x2="607.7" y2="107.5"/>
+  <line class="edge" x1="607.7" y1="107.5" x2="642.5" y2="72.7"/>
+  <line class="edge" x1="642.5" y1="72.7"  x2="690.0" y2="60.0"/>
+
+  <!-- rewired long-range chords (small-world shortcuts) -->
+  <line class="chord" x1="737.5" y1="72.7"  x2="642.5" y2="237.3"/>
+  <line class="chord" x1="772.3" y1="202.5" x2="607.7" y2="107.5"/>
+  <line class="chord" x1="690.0" y1="60.0"  x2="690.0" y2="250.0"/>
+
+  <!-- nodes (decision hub at 595,155) -->
+  <circle class="node nSIL"   cx="690.0" cy="60.0"  r="9"/>
+  <circle class="nVOICE"      cx="737.5" cy="72.7"  r="9"/>
+  <circle class="node nSIL"   cx="772.3" cy="107.5" r="9"/>
+  <circle class="node nSIL"   cx="785.0" cy="155.0" r="9"/>
+  <circle class="nVOICE"      cx="772.3" cy="202.5" r="9"/>
+  <circle class="node nSIL"   cx="737.5" cy="237.3" r="9"/>
+  <circle class="node nSIL"   cx="690.0" cy="250.0" r="9"/>
+  <circle class="nVOICE"      cx="642.5" cy="237.3" r="9"/>
+  <circle class="node nSIL"   cx="607.7" cy="202.5" r="9"/>
+  <circle class="node nSIL"   cx="595.0" cy="155.0" r="9"/>
+  <circle class="node nSIL"   cx="607.7" cy="107.5" r="9"/>
+  <circle class="nVOICE"      cx="642.5" cy="72.7"  r="9"/>
+</g>
+
+<!-- legend -->
+<g>
+  <circle class="node nSIL" cx="612" cy="284" r="5"/><text x="622" y="288" class="glab">SILENCE</text>
+  <circle class="nVOICE"    cx="700" cy="284" r="5"/><text x="710" y="288" class="glab">VOICE</text>
+  <circle class="facet"     cx="772" cy="284" r="5"/><text x="782" y="288" class="glab">IVT rule</text>
+</g>
+</svg>
