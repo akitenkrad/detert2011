@@ -197,7 +197,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "detert-silence-simulation"
+name = "detert-simulation"
 version = "0.1.0"
 dependencies = [
  "chrono",
