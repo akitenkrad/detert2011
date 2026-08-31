@@ -6,7 +6,7 @@
 
 ```bash
 cargo run --release -- run --llm-mode rule --t-max 60 --runs 1 --seed 42
-uv run detert-tools reproduce --results-dir results/latest
+uv run detert-tools reproduce
 ```
 
 ## 1. Table 4 風レポート（`table4_report.csv`）
@@ -19,7 +19,7 @@ uv run detert-tools reproduce --results-dir results/latest
 | `silence_voice_corr` | r = −.55（Study 4） | [−.65, −.45] 以内 |
 | 最頻 IVT ルール | "need solid data"（Study 2） | `need_data` が最大 |
 
-silence–voice 相関は実行レベルの **時間平均** per-agent 値（`llm_meta.json` に `silence_voice_corr` として記録）である．`metrics.csv` のステップ別値はステップ内 VOICE/SILENCE スナップショット（厳密な二分 → −1）だが，論文が報告するのは弁別的な silence と voice の傾性間の段階的重複である．
+silence–voice 相関は実行レベルの **時間平均** per-agent 値（run スコープの指標 `silence_voice_corr_timeavg`）である．`metrics.csv` のステップ別値はステップ内 VOICE/SILENCE スナップショット（厳密な二分 → −1）だが，論文が報告するのは弁別的な silence と voice の傾性間の段階的重複である．
 
 ## 2. CFA 系適合度指標（`cfa_fit_indices.csv`）
 

@@ -45,12 +45,12 @@ export OLLAMA_HOST=http://localhost:11434 OLLAMA_MODEL=llama3.1
 cargo run --release -- run --llm-mode llm --cache-path runs/detert_cache.json --t-max 60
 ```
 
-LLM は `{decision, motive, active_rules}` を返し，`rule_activation.csv` がモデルの報告する発火ルールを記録する．同一引数で再実行すると warm cache を再生する（cache-hit → 100%）．
+LLM は `{decision, motive, active_rules}` を返し，`rule_*` 指標がモデルの報告する発火ルールを記録する．同一引数で再実行すると warm cache を再生する（cache-hit → 100%）．
 
 ## 5. 弁別的妥当性チェック + Table 4 レポート
 
 ```bash
-uv run detert-tools reproduce --results-dir results/latest
+uv run detert-tools reproduce
 ```
 
 Table 4 風アンカーレポートと，ABM ルール発火行列から再現した CFA 系適合度指標を表示する．

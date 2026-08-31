@@ -1,8 +1,8 @@
 """detert-tools — unified CLI dispatcher.
 
     detert-tools visualize                 # silence-rate series + rule heatmap + scatter
-    detert-tools visualize-sweep           # β_ι × ψ̄ phase diagram
-    detert-tools show-experiment-settings  # print config / sweep_config / llm_meta
+    detert-tools visualize-sweep           # β_ι × ψ̄ phase diagram (from the sweep's children)
+    detert-tools show-experiment-settings  # print a run's parameters / llm block / run metrics
     detert-tools reproduce                 # Table-4-style report + CFA-style fit indices
 
 Arguments after the subcommand are passed verbatim to that subcommand's argparse.
@@ -29,7 +29,7 @@ main = build_dispatcher(
             "detert_tools.visualize_sweep:main",
         ),
         "show-experiment-settings": (
-            "print a results directory's settings (config / sweep_config / llm_meta)",
+            "print a run's settings (parameters / llm block / run-scope metrics)",
             "detert_tools.show_experiment_settings:main",
         ),
         "reproduce": (

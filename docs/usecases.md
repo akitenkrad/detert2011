@@ -45,12 +45,12 @@ export OLLAMA_HOST=http://localhost:11434 OLLAMA_MODEL=llama3.1
 cargo run --release -- run --llm-mode llm --cache-path runs/detert_cache.json --t-max 60
 ```
 
-The LLM returns `{decision, motive, active_rules}`; the `rule_activation.csv` then records which rules the model reports firing. Re-running with the same arguments replays the warm cache (cache-hit → 100%).
+The LLM returns `{decision, motive, active_rules}`; the `rule_*` metrics then record which rules the model reports firing. Re-running with the same arguments replays the warm cache (cache-hit → 100%).
 
 ## 5. Discriminant-validity check + Table-4 report
 
 ```bash
-uv run detert-tools reproduce --results-dir results/latest
+uv run detert-tools reproduce
 ```
 
 Prints the Table-4-style anchor report and the CFA-style fit indices reproduced from the ABM rule-firing matrix.

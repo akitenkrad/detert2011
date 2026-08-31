@@ -1,25 +1,31 @@
 //! Detert & Edmondson (2011) — Implicit Voice Theories silence CLI.
 //!
 //! `run`       : single configuration; `--llm-mode {llm|rule|rule_no_ivt}`.
-//! `sweep`     : Cartesian product over `β_ι × ψ̄ × seeds`; one row per cell.
+//! `sweep`     : Cartesian product over `β_ι × ψ̄ × seeds`; a parent run plus one
+//!               child run per cell × trial.
 //! `ablation`  : contrast decision modes (e.g. `rule,rule_no_ivt`) across seeds.
 //! `reproduce` : per-mode steady-state report against the design's anchors.
+//!
+//! サブコマンド 1 回が runvault の run 1 本になる．出力の置き場と同一性 (run ディレ
+//! クトリ・`config.json`・`metrics.csv`・`events.jsonl`) は runvault が持つので，
+//! ここではタイムスタンプ付きディレクトリも `latest` symlink も作らない．
 
 use std::fs;
 use std::path::Path;
 
 use clap::{Parser, Subcommand};
+use runvault::{Lineage, Run, RunOptions};
+use serde::Serialize;
 
 use detert_silence::config::{
     parse_llm_mode, parse_network_kind, BetaGroup, Config, LlmMode, LlmSettings, NetworkKind,
+    RunConfigJson,
 };
-use detert_silence::simulation::{
-    cohens_d, ensure_output_dir, run, save_agents, save_llm_meta, save_metrics,
-    save_rule_activation, SimulationResult,
-};
+use detert_silence::llm::{build_live_client, SilenceClient};
+use detert_silence::record::{self, AblationTrial, Check, DOMAIN, EXPERIMENT, REPO_ID};
+use detert_silence::simulation::{cohens_d, run_with_client, SimulationResult};
 
 use socsim_core::derive_seed;
-use socsim_results::{refresh_latest_symlink, timestamp, write_csv, write_json};
 
 // --------------------------------------------------------------------------- //
 // CLI
@@ -42,7 +48,7 @@ struct Cli {
 enum Commands {
     /// Run a single configuration.
     Run(RunArgs),
-    /// Sweep β_ι × ψ̄ across seeds; aggregate into `sweep_summary.csv`.
+    /// Sweep β_ι × ψ̄ across seeds; a parent run plus one child run per cell × trial.
     Sweep(SweepArgs),
     /// Contrast decision modes across a seed range.
     Ablation(AblationArgs),
@@ -208,30 +214,54 @@ struct ReproduceArgs {
 }
 
 // --------------------------------------------------------------------------- //
-// CSV rows
+// run ごとの parameters
 // --------------------------------------------------------------------------- //
 
-#[derive(serde::Serialize)]
-struct SweepRow {
-    llm_mode: String,
-    beta_ivt: f64,
+/// `sweep` の子 run の条件．
+///
+/// ψ̄ は [`Config`] に無い — β_ψ の倍率としてしか効かないためである．しかし掃引の
+/// 軸そのものなので子の条件として残す．無いと «どの ψ̄ の run だったか» が後から
+/// 辿れず，旧 `sweep_summary.csv` の `psafety_mean` 列が失われる．
+#[derive(Serialize)]
+struct SweepPointConfigJson {
+    #[serde(flatten)]
+    base: RunConfigJson,
     psafety_mean: f64,
-    run: usize,
-    seed: u64,
-    final_round: u64,
-    upward_silence_rate: f64,
-    silence_voice_corr: f64,
-    max_rule_cooccurrence: f64,
-    convergence_step: i64,
 }
 
-#[derive(serde::Serialize)]
-struct AblationRow {
-    mode: String,
+/// `sweep` 親 run の条件 — 格子の定義そのもの．
+#[derive(Serialize)]
+struct SweepConfigJson {
+    llm_mode: String,
+    n_teams: usize,
+    team_size: usize,
+    beta_ivt_values: Vec<f64>,
+    psafety_mean_values: Vec<f64>,
+    runs: usize,
+    t_max: u64,
     seed: u64,
-    upward_silence_rate: f64,
-    silence_voice_corr: f64,
-    max_rule_cooccurrence: f64,
+}
+
+/// `ablation` run の条件．
+#[derive(Serialize)]
+struct AblationConfigJson {
+    modes: Vec<String>,
+    n_teams: usize,
+    team_size: usize,
+    seed_start: u64,
+    seed_end: u64,
+    t_max: u64,
+}
+
+/// `reproduce` run の条件．
+#[derive(Serialize)]
+struct ReproduceConfigJson {
+    llm_mode: String,
+    n_teams: usize,
+    team_size: usize,
+    t_max: u64,
+    runs: usize,
+    seed: u64,
 }
 
 // --------------------------------------------------------------------------- //
@@ -243,6 +273,28 @@ fn parse_f64_list(s: &str) -> Vec<f64> {
         .filter(|t| !t.is_empty())
         .filter_map(|t| t.trim().parse::<f64>().ok())
         .collect()
+}
+
+fn mean(v: &[f64]) -> f64 {
+    v.iter().sum::<f64>() / v.len().max(1) as f64
+}
+
+/// LLM モードなら 1 試行ぶんのクライアントを組む．規則モードは LLM を 1 度も
+/// 呼ばないので `None`．
+fn build_client(cfg: &Config) -> Option<SilenceClient> {
+    if cfg.llm_mode.is_llm() {
+        Some(
+            build_live_client(&cfg.llm)
+                .unwrap_or_else(|e| panic!("LLM クライアント構築に失敗: {e}")),
+        )
+    } else {
+        None
+    }
+}
+
+/// 実際に応答するバックエンドから `llm` ブロックを組む．
+fn llm_block_of(client: Option<&SilenceClient>, temperature: f32) -> Option<runvault::Llm> {
+    client.map(|c| record::llm_block(c.inner().model(), c.inner().endpoint(), temperature))
 }
 
 fn cfg_from_run_args(args: &RunArgs) -> Config {
@@ -280,7 +332,6 @@ fn cfg_from_run_args(args: &RunArgs) -> Config {
             seed: args.llm_seed,
             cache_path: Some(args.cache_path.clone()),
         },
-        output_dir: args.output_dir.clone(),
         ..Config::default()
     }
 }
@@ -290,17 +341,33 @@ fn cfg_from_run_args(args: &RunArgs) -> Config {
 // --------------------------------------------------------------------------- //
 
 fn cmd_run(args: RunArgs) {
-    let timestamp = timestamp();
-    let output_dir = format!("{}/{}", args.output_dir, timestamp);
-    ensure_output_dir(&output_dir);
-
-    let mut base_cfg = cfg_from_run_args(&args);
-    base_cfg.output_dir = output_dir.clone();
+    let base_cfg = cfg_from_run_args(&args);
     if base_cfg.llm_mode.is_llm() {
         if let Some(parent) = Path::new(&args.cache_path).parent() {
             let _ = fs::create_dir_all(parent);
         }
     }
+
+    // LLM クライアントは run を開始する前に組む．`llm` ブロックに書くモデル名と
+    // endpoint は，実際に応答するバックエンドから採らないと意味を持たない．組んだ
+    // ものは 1 本目の試行がそのまま使う．
+    let mut pending = build_client(&base_cfg);
+    let llm = llm_block_of(pending.as_ref(), base_cfg.llm.temperature);
+
+    let parameters = base_cfg.to_run_config_json();
+    let mut options = RunOptions::new(EXPERIMENT, "run")
+        .repo_id(REPO_ID)
+        .domain(DOMAIN)
+        .results_root(&args.output_dir)
+        .parameters(&parameters)
+        .expect("runvault: parameters の組み立てに失敗")
+        .seed_pointers(["/seed"])
+        .master_seed(base_cfg.seed)
+        .replication(record::replication());
+    if let Some(llm) = llm {
+        options = options.llm(llm);
+    }
+    let mut rv = Run::start(options).expect("runvault: run の開始に失敗");
 
     println!("=== Detert & Edmondson (2011) — Implicit Voice Theories ===");
     println!(
@@ -324,13 +391,8 @@ fn cmd_run(args: RunArgs) {
         base_cfg.runs,
         base_cfg.seed,
     );
-    println!("output: {output_dir}");
+    println!("出力先: {}", rv.dir().display());
     println!("----------------------------------------------------------------------");
-
-    {
-        let path = format!("{output_dir}/config.json");
-        write_json(&base_cfg.to_run_config_json(), &path).expect("failed to write config.json");
-    }
 
     let mut last_result: Option<SimulationResult> = None;
     let runs = base_cfg.runs.max(1);
@@ -340,7 +402,8 @@ fn cmd_run(args: RunArgs) {
             seed,
             ..base_cfg.clone()
         };
-        let result = run(&cfg).unwrap_or_else(|e| panic!("run failed: {e}"));
+        let client = pending.take().or_else(|| build_client(&cfg));
+        let result = run_with_client(&cfg, client).unwrap_or_else(|e| panic!("run failed: {e}"));
         println!(
             "[{}/{}] seed={} upward_silence={:.3} silence_voice_r={:.3} max_cooc={:.3} conv={:?}",
             run_idx + 1,
@@ -358,13 +421,11 @@ fn cmd_run(args: RunArgs) {
         last_result = Some(result);
     }
 
+    // 記録するのは最後の試行 — 移行前も `metrics.csv` / `agents.csv` は最後の試行
+    // のものだった．`runs` は parameters にあるので，何本目を記録したかは辿れる．
     let result = last_result.expect("at least one run");
-    save_metrics(&result, &output_dir);
-    save_agents(&result, &output_dir);
-    save_rule_activation(&result, &output_dir);
-    save_llm_meta(&result, &base_cfg, &output_dir);
-
-    let _ = refresh_latest_symlink(&args.output_dir, &timestamp);
+    record::log_simulation(&mut rv, &result);
+    record::save_agents(&rv, &result);
 
     println!("----------------------------------------------------------------------");
     println!(
@@ -374,11 +435,10 @@ fn cmd_run(args: RunArgs) {
         result.metadata.cache_hit_rate() * 100.0,
         result.llm_model,
     );
-    println!("metrics        → {output_dir}/metrics.csv");
-    println!("agents         → {output_dir}/agents.csv");
-    println!("rule_activation→ {output_dir}/rule_activation.csv");
-    println!("llm_meta       → {output_dir}/llm_meta.json");
-    println!("config         → {output_dir}/config.json");
+    let dir = rv.finish().expect("runvault: run の完了に失敗");
+    println!("指標   → {}/metrics.csv", dir.display());
+    println!("従業員 → {}/artifacts/agents.csv", dir.display());
+    println!("設定   → {}/config.json", dir.display());
 }
 
 // --------------------------------------------------------------------------- //
@@ -387,10 +447,6 @@ fn cmd_run(args: RunArgs) {
 
 fn cmd_sweep(args: SweepArgs) {
     let llm_mode = parse_llm_mode(&args.llm_mode).unwrap_or_else(|e| panic!("{e}"));
-    let timestamp = timestamp();
-    let dir_name = format!("{timestamp}_sweep");
-    let sweep_dir = format!("{}/{}", args.output_dir, dir_name);
-    fs::create_dir_all(&sweep_dir).expect("failed to create sweep dir");
 
     let mut beta_ivt_vals: Vec<f64> = Vec::new();
     let mut b = args.beta_ivt_min;
@@ -402,6 +458,40 @@ fn cmd_sweep(args: SweepArgs) {
 
     let n_cells = beta_ivt_vals.len() * psafety_vals.len();
     let n_total = n_cells * args.runs;
+
+    // 親 run: 格子の定義そのものを parameters に持つ．個別条件の指標は書かない．
+    // 親は単一の master_seed を持たない (条件ごとの子が派生シードをそれぞれ持つ)．
+    // base seed は /parameters.seed と seed_pointers 経由で execution_hash に残る．
+    // sweep_id は runvault が親の run_slug で埋める．
+    let sweep_parameters = SweepConfigJson {
+        llm_mode: llm_mode.label().to_string(),
+        n_teams: args.n_teams,
+        team_size: args.team_size,
+        beta_ivt_values: beta_ivt_vals.clone(),
+        psafety_mean_values: psafety_vals.clone(),
+        runs: args.runs,
+        t_max: args.t_max,
+        seed: args.seed,
+    };
+    let parent = Run::start(
+        RunOptions::new(EXPERIMENT, "sweep")
+            .repo_id(REPO_ID)
+            .domain(DOMAIN)
+            .results_root(&args.output_dir)
+            .parameters(&sweep_parameters)
+            .expect("runvault: sweep の parameters の組み立てに失敗")
+            .seed_pointers(["/seed"])
+            .sweep_parent()
+            .replication(record::replication()),
+    )
+    .expect("runvault: sweep 親 run の開始に失敗");
+
+    let sweep_id = parent
+        .sweep_id()
+        .expect("runvault: sweep 親に sweep_id がありません")
+        .to_string();
+    let parent_run_uid = parent.run_uid().to_string();
+
     println!("=== detert-sweep ===");
     println!(
         "mode: {} | β_ι={:?} | ψ̄={:?} | runs/cell={} | total {} runs",
@@ -411,26 +501,9 @@ fn cmd_sweep(args: SweepArgs) {
         args.runs,
         n_total,
     );
-    println!("output: {sweep_dir}");
+    println!("出力先: {}", parent.dir().display());
     println!("------------------------------------------------------------");
 
-    {
-        let config_json = serde_json::json!({
-            "command": "sweep",
-            "llm_mode": llm_mode.label(),
-            "n_teams": args.n_teams,
-            "team_size": args.team_size,
-            "beta_ivt_values": beta_ivt_vals,
-            "psafety_mean_values": psafety_vals,
-            "runs": args.runs,
-            "t_max": args.t_max,
-            "seed": args.seed,
-        });
-        let path = format!("{sweep_dir}/sweep_config.json");
-        write_json(&config_json, &path).expect("failed to write sweep_config.json");
-    }
-
-    let mut rows: Vec<SweepRow> = Vec::with_capacity(n_total);
     let mut idx = 0usize;
     for &bivt in &beta_ivt_vals {
         for &psi in &psafety_vals {
@@ -461,41 +534,63 @@ fn cmd_sweep(args: SweepArgs) {
                     seed,
                     ..Config::default()
                 };
-                let result = run(&cfg).unwrap_or_else(|e| panic!("sweep run failed: {e}"));
+
+                let client = build_client(&cfg);
+                let llm = llm_block_of(client.as_ref(), cfg.llm.temperature);
+
+                // 子は «その条件の run» そのもの．master_seed は base から派生した
+                // 実際に使われるシードで，同一条件の繰り返しは replicate_index で分ける．
+                let parameters = SweepPointConfigJson {
+                    base: cfg.to_run_config_json(),
+                    psafety_mean: psi,
+                };
+                let mut options = RunOptions::new(EXPERIMENT, "run")
+                    .repo_id(REPO_ID)
+                    .domain(DOMAIN)
+                    .results_root(&args.output_dir)
+                    .parameters(&parameters)
+                    .expect("runvault: 子 run の parameters の組み立てに失敗")
+                    .seed_pointers(["/seed"])
+                    .master_seed(seed)
+                    .replicate_index(run_idx as u64)
+                    .lineage(Lineage {
+                        sweep_id: Some(sweep_id.clone()),
+                        parent_run_uid: Some(parent_run_uid.clone()),
+                        ..Default::default()
+                    })
+                    .replication(record::replication());
+                if let Some(llm) = llm {
+                    options = options.llm(llm);
+                }
+                let mut child = Run::start(options).expect("runvault: 子 run の開始に失敗");
+
+                let result = run_with_client(&cfg, client)
+                    .unwrap_or_else(|e| panic!("sweep run failed: {e}"));
+                record::log_simulation(&mut child, &result);
+                record::save_agents(&child, &result);
+
                 let last = result
                     .metrics_rows
                     .last()
                     .expect("metrics_rows must not be empty");
-                rows.push(SweepRow {
-                    llm_mode: llm_mode.label().to_string(),
-                    beta_ivt: bivt,
-                    psafety_mean: psi,
-                    run: run_idx,
-                    seed,
-                    final_round: result.final_round,
-                    upward_silence_rate: last.upward_silence_rate,
-                    silence_voice_corr: result.final_silence_voice_corr(),
-                    max_rule_cooccurrence: last.max_rule_cooccurrence,
-                    convergence_step: result.convergence_step.map(|x| x as i64).unwrap_or(-1),
-                });
                 if idx.is_multiple_of(10) || idx == n_total {
                     println!(
                         "[{}/{}] β_ι={:.2} ψ̄={:.2} run={} upward_silence={:.3}",
                         idx, n_total, bivt, psi, run_idx, last.upward_silence_rate
                     );
                 }
+                child.finish().expect("runvault: 子 run の完了に失敗");
             }
         }
     }
 
-    let path = format!("{sweep_dir}/sweep_summary.csv");
-    write_csv(&rows, &path).expect("failed to write sweep_summary.csv");
-
-    let _ = refresh_latest_symlink(&args.output_dir, &dir_name);
+    let dir = parent
+        .finish()
+        .expect("runvault: sweep 親 run の完了に失敗");
     println!("------------------------------------------------------------");
     println!("sweep done.");
-    println!("summary → {sweep_dir}/sweep_summary.csv");
-    println!("config  → {sweep_dir}/sweep_config.json");
+    println!("掃引の定義 → {}/config.json", dir.display());
+    println!("各セルの指標は子 run (subcommand=run) の metrics.csv にあります");
 }
 
 // --------------------------------------------------------------------------- //
@@ -511,10 +606,43 @@ fn cmd_ablation(args: AblationArgs) {
         .collect();
     assert!(!modes.is_empty(), "no modes given");
 
-    let timestamp = timestamp();
-    let dir_name = format!("{timestamp}_ablation");
-    let abl_dir = format!("{}/{}", args.output_dir, dir_name);
-    fs::create_dir_all(&abl_dir).expect("failed to create ablation dir");
+    // 決定モードごとの腕を «1 回の実行の中で» 対比するのが ablation の主張なので，
+    // 試行を子 run に割らない — 割ると IVT 主効果 (rule − rule_no_ivt) がどの run に
+    // も属さなくなる．一方この run は 1 つの master_seed から派生するのではなく
+    // seed_start..=seed_end という «シードの列» で駆動されるので，master_seed は
+    // 名乗らない (runvault が sweep 親に用意している免除がこの形にあたる)．
+    // 列そのものは /parameters と seed_pointers 経由で execution_hash に残る．
+    let ablation_parameters = AblationConfigJson {
+        modes: modes.iter().map(|m| m.label().to_string()).collect(),
+        n_teams: args.n_teams,
+        team_size: args.team_size,
+        seed_start: args.seed_start,
+        seed_end: args.seed_end,
+        t_max: args.t_max,
+    };
+
+    // 最初に LLM を使う試行のクライアントだけ run の開始前に組む (`llm` ブロックの
+    // モデル名と endpoint は実際に応答するバックエンドからしか採れない)．
+    let probe_cfg = Config {
+        llm_mode: *modes.iter().find(|m| m.is_llm()).unwrap_or(&modes[0]),
+        ..Config::default()
+    };
+    let mut pending = build_client(&probe_cfg);
+    let llm = llm_block_of(pending.as_ref(), probe_cfg.llm.temperature);
+
+    let mut options = RunOptions::new(EXPERIMENT, "ablation")
+        .repo_id(REPO_ID)
+        .domain(DOMAIN)
+        .results_root(&args.output_dir)
+        .parameters(&ablation_parameters)
+        .expect("runvault: ablation の parameters の組み立てに失敗")
+        .seed_pointers(["/seed_start", "/seed_end"])
+        .sweep_parent()
+        .replication(record::replication());
+    if let Some(llm) = llm {
+        options = options.llm(llm);
+    }
+    let mut rv = Run::start(options).expect("runvault: ablation run の開始に失敗");
 
     println!("=== detert-ablation ===");
     println!(
@@ -526,22 +654,8 @@ fn cmd_ablation(args: AblationArgs) {
         args.team_size,
         args.t_max,
     );
+    println!("出力先: {}", rv.dir().display());
 
-    {
-        let config_json = serde_json::json!({
-            "command": "ablation",
-            "modes": modes.iter().map(|m| m.label()).collect::<Vec<_>>(),
-            "n_teams": args.n_teams,
-            "team_size": args.team_size,
-            "seed_start": args.seed_start,
-            "seed_end": args.seed_end,
-            "t_max": args.t_max,
-        });
-        write_json(&config_json, format!("{abl_dir}/sweep_config.json"))
-            .expect("failed to write sweep_config.json");
-    }
-
-    let mut rows: Vec<AblationRow> = Vec::new();
     let mut per_mode: std::collections::BTreeMap<String, Vec<f64>> =
         std::collections::BTreeMap::new();
     for &mode in &modes {
@@ -555,28 +669,34 @@ fn cmd_ablation(args: AblationArgs) {
                 seed,
                 ..Config::default()
             };
-            let result = run(&cfg).unwrap_or_else(|e| panic!("ablation run failed: {e}"));
+            let client = if cfg.llm_mode.is_llm() {
+                pending.take().or_else(|| build_client(&cfg))
+            } else {
+                None
+            };
+            let result = run_with_client(&cfg, client)
+                .unwrap_or_else(|e| panic!("ablation run failed: {e}"));
             let last = result.metrics_rows.last().expect("metrics");
             per_mode
                 .entry(mode.label().to_string())
                 .or_default()
                 .push(last.upward_silence_rate);
-            rows.push(AblationRow {
-                mode: mode.label().to_string(),
-                seed,
-                upward_silence_rate: last.upward_silence_rate,
-                silence_voice_corr: result.final_silence_voice_corr(),
-                max_rule_cooccurrence: last.max_rule_cooccurrence,
-            });
+            record::log_trial(
+                &mut rv,
+                &AblationTrial {
+                    mode: mode.label().to_string(),
+                    seed,
+                    upward_silence_rate: last.upward_silence_rate,
+                    silence_voice_corr: result.final_silence_voice_corr(),
+                    max_rule_cooccurrence: last.max_rule_cooccurrence,
+                },
+            );
         }
     }
 
-    write_csv(&rows, format!("{abl_dir}/ablation_summary.csv"))
-        .expect("failed to write ablation_summary.csv");
-
     println!("------------------------------------------------------------");
-    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
     for (m, v) in &per_mode {
+        record::log_mode_summary(&mut rv, m, v);
         println!(
             "  {:<12} mean upward_silence_rate = {:.3} (n={})",
             m,
@@ -586,24 +706,63 @@ fn cmd_ablation(args: AblationArgs) {
     }
     // IVT necessity: rule vs rule_no_ivt Cohen's d.
     if let (Some(r), Some(n)) = (per_mode.get("rule"), per_mode.get("rule_no_ivt")) {
+        let delta = mean(r) - mean(n);
         let d = cohens_d(r, n);
-        println!(
-            "  IVT main effect (rule − rule_no_ivt): Δ={:.3}, Cohen's d={:.2}",
-            mean(r) - mean(n),
-            d
-        );
+        record::log_ivt_effect(&mut rv, delta, d);
+        println!("  IVT main effect (rule − rule_no_ivt): Δ={delta:.3}, Cohen's d={d:.2}");
     }
-    let _ = refresh_latest_symlink(&args.output_dir, &dir_name);
-    println!("summary → {abl_dir}/ablation_summary.csv");
+
+    let dir = rv.finish().expect("runvault: ablation run の完了に失敗");
+    println!("試行   → {}/events.jsonl", dir.display());
+    println!("集約   → {}/metrics.csv", dir.display());
 }
 
 // --------------------------------------------------------------------------- //
 // reproduce
 // --------------------------------------------------------------------------- //
 
+/// 設計書 §5 のアンカー．論文が報告した数値そのものではなく，この再現実装が置いた
+/// 定性的な帯なので `reference.csv` には書かない (`record::log_checks` を参照)．
+const HICO_ANCHOR: f64 = 0.50;
+const HICO_TOL: f64 = 0.07;
+const SILENCE_VOICE_BAND: (f64, f64) = (-0.65, -0.45);
+const COOCCURRENCE_MAX: f64 = 0.50;
+
 fn cmd_reproduce(args: ReproduceArgs) {
     let mode = parse_llm_mode(&args.llm_mode).unwrap_or_else(|e| panic!("{e}"));
+
+    let parameters = ReproduceConfigJson {
+        llm_mode: mode.label().to_string(),
+        n_teams: args.n_teams,
+        team_size: args.team_size,
+        t_max: args.t_max,
+        runs: args.runs,
+        seed: args.seed,
+    };
+
+    let probe_cfg = Config {
+        llm_mode: mode,
+        ..Config::default()
+    };
+    let mut pending = build_client(&probe_cfg);
+    let llm = llm_block_of(pending.as_ref(), probe_cfg.llm.temperature);
+
+    let mut options = RunOptions::new(EXPERIMENT, "reproduce")
+        .repo_id(REPO_ID)
+        .domain(DOMAIN)
+        .results_root(&args.output_dir)
+        .parameters(&parameters)
+        .expect("runvault: reproduce の parameters の組み立てに失敗")
+        .seed_pointers(["/seed"])
+        .master_seed(args.seed)
+        .replication(record::replication());
+    if let Some(llm) = llm {
+        options = options.llm(llm);
+    }
+    let mut rv = Run::start(options).expect("runvault: reproduce run の開始に失敗");
+
     println!("=== detert-reproduce ({} mode) ===", mode.label());
+    println!("出力先: {}", rv.dir().display());
     let mut up = Vec::new();
     let mut sv = Vec::new();
     let mut cooc = Vec::new();
@@ -618,48 +777,84 @@ fn cmd_reproduce(args: ReproduceArgs) {
             seed,
             ..Config::default()
         };
-        let result = run(&cfg).unwrap_or_else(|e| panic!("reproduce run failed: {e}"));
+        let client = if cfg.llm_mode.is_llm() {
+            pending.take().or_else(|| build_client(&cfg))
+        } else {
+            None
+        };
+        let result =
+            run_with_client(&cfg, client).unwrap_or_else(|e| panic!("reproduce run failed: {e}"));
         let last = result.metrics_rows.last().expect("metrics");
         up.push(last.upward_silence_rate);
         sv.push(result.final_silence_voice_corr());
         cooc.push(last.max_rule_cooccurrence);
     }
-    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
-    println!("steady-state over {} runs:", up.len());
+
     let mu = mean(&up);
-    println!(
-        "  upward_silence_rate  = {:.3}   (HiCo anchor ≈ 0.50; PASS if |Δ|<.07: {})",
-        mu,
-        if (mu - 0.50).abs() < 0.07 {
-            "PASS"
-        } else {
-            "off-anchor"
-        }
-    );
     let msv = mean(&sv);
-    println!(
-        "  silence_voice_corr   = {:.3}   (Study 4 r=-.55; PASS if ∈[-.65,-.45]: {})",
-        msv,
-        if (-0.65..=-0.45).contains(&msv) {
-            "PASS"
-        } else {
-            "review"
-        }
-    );
     let mc = mean(&cooc);
+    let checks = vec![
+        Check {
+            indicator: "upward_silence_rate".to_string(),
+            observed: mu,
+            band: format!("|Δ| < {HICO_TOL:.2} around {HICO_ANCHOR:.2}"),
+            verdict: if (mu - HICO_ANCHOR).abs() < HICO_TOL {
+                "PASS"
+            } else {
+                "off-anchor"
+            }
+            .to_string(),
+        },
+        Check {
+            indicator: "silence_voice_corr".to_string(),
+            observed: msv,
+            band: format!(
+                "within [{:.2}, {:.2}]",
+                SILENCE_VOICE_BAND.0, SILENCE_VOICE_BAND.1
+            ),
+            verdict: if (SILENCE_VOICE_BAND.0..=SILENCE_VOICE_BAND.1).contains(&msv) {
+                "PASS"
+            } else {
+                "review"
+            }
+            .to_string(),
+        },
+        Check {
+            indicator: "max_rule_cooccurrence".to_string(),
+            observed: mc,
+            band: format!("< {COOCCURRENCE_MAX:.2}"),
+            verdict: if mc < COOCCURRENCE_MAX {
+                "PASS"
+            } else {
+                "non-discriminant"
+            }
+            .to_string(),
+        },
+    ];
+    record::log_observations(&mut rv, &checks);
+    record::log_checks(&mut rv, &checks);
+
+    println!("steady-state over {} runs:", up.len());
     println!(
-        "  max_rule_cooccurrence= {:.3}   (discriminant <.50: {})",
-        mc,
-        if mc < 0.50 {
-            "PASS"
-        } else {
-            "non-discriminant"
-        }
+        "  upward_silence_rate  = {:.3}   (HiCo anchor ≈ {:.2}; PASS if |Δ|<{:.2}: {})",
+        mu, HICO_ANCHOR, HICO_TOL, checks[0].verdict,
+    );
+    println!(
+        "  silence_voice_corr   = {:.3}   (Study 4 r=-.55; PASS if ∈[{:.2},{:.2}]: {})",
+        msv, SILENCE_VOICE_BAND.0, SILENCE_VOICE_BAND.1, checks[1].verdict,
+    );
+    println!(
+        "  max_rule_cooccurrence= {:.3}   (discriminant <{:.2}: {})",
+        mc, COOCCURRENCE_MAX, checks[2].verdict,
     );
     println!();
     println!("For the full Table-4-style report + CFA-style fit indices (RMSEA / CFI)");
     println!("reproduced from the ABM rule-firing matrix, run the Python tool:");
-    println!("  uv run detert-tools reproduce --results-dir results/latest");
+    println!("  uv run detert-tools reproduce");
+
+    let dir = rv.finish().expect("runvault: reproduce run の完了に失敗");
+    println!("観測量 → {}/metrics.csv", dir.display());
+    println!("帯照合 → {}/events.jsonl", dir.display());
 }
 
 // --------------------------------------------------------------------------- //

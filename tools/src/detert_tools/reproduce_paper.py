@@ -14,18 +14,28 @@ Runs end-to-end on a Track-B ABM results directory (no survey data required):
      discriminant-validity finding (Study 3: RMSEA=.05, CFI=.97 for the
      *correct* 5-factor model; a collapsed 1-factor model should fit worse).
 
-Writes `table4_report.csv` and `cfa_fit_indices.csv` to the results directory.
+--results-dir を省略すると
+`runvault path --experiment detert --latest --subcommand run --standalone`
+が返す run を対象にする．`table4_report.csv` と `cfa_fit_indices.csv` は run が
+終わった後に作るものなので run の外 (`<experiment>/figures/<run_slug>/`) に書く．
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 
 import numpy as np
 import pandas as pd
+
+from detert_tools.run_io import (
+    agents_table,
+    latest_run,
+    metrics_table,
+    output_dir as default_output_dir,
+    run_metrics,
+)
 
 RULES = ["target_id", "need_data", "no_bypass", "no_embarrass", "career_consq"]
 
@@ -122,40 +132,37 @@ def _one_factor_fit(corr: np.ndarray, n_obs: int) -> dict[str, float]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="detert-tools reproduce")
-    parser.add_argument("--results-dir", default="results/latest")
-    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--results-dir", "--results_dir", default=None)
+    parser.add_argument("--results-root", "--results_root", default="results")
+    parser.add_argument("--output-dir", "--output_dir", default=None)
     args = parser.parse_args(argv)
 
-    results_dir = args.results_dir
-    output_dir = args.output_dir or results_dir
+    results_dir = args.results_dir or latest_run(results_root=args.results_root)
+    output_dir = args.output_dir or default_output_dir(results_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    metrics_path = os.path.join(results_dir, "metrics.csv")
-    agents_path = os.path.join(results_dir, "agents.csv")
-    if not os.path.exists(metrics_path) or not os.path.exists(agents_path):
+    try:
+        metrics = metrics_table(results_dir)
+        agents = agents_table(results_dir)
+    except FileNotFoundError as exc:
         print(
-            f"error: need metrics.csv + agents.csv in {results_dir}\n"
+            f"error: {exc}\n"
             f"  run e.g. `cargo run --release -- run --llm-mode rule` first",
             file=sys.stderr,
         )
         return 1
-
-    metrics = pd.read_csv(metrics_path)
-    agents = pd.read_csv(agents_path)
-    tail = metrics[metrics["t"] >= metrics["t"].max() // 2]
+    tail = metrics[metrics["step"] >= metrics["step"].max() // 2]
 
     # The per-step silence_voice_corr in metrics.csv is the within-step snapshot
     # (a hard VOICE/SILENCE dichotomy → −1); the run-level time-averaged value
-    # (the graded Study-4 construct) is recorded in llm_meta.json.
-    meta_sv = None
-    meta_path = os.path.join(results_dir, "llm_meta.json")
-    if os.path.exists(meta_path):
-        with open(meta_path, encoding="utf-8") as f:
-            meta_sv = json.load(f).get("silence_voice_corr")
+    # (the graded Study-4 construct) is the run-scope metric
+    # `silence_voice_corr_timeavg`.
+    meta_sv = run_metrics(results_dir).get("silence_voice_corr_timeavg")
 
     print("=" * 66)
     print("Detert & Edmondson (2011) — one-command reproduction (Track B ABM)")
     print("=" * 66)
+    print(f"run: {results_dir}")
 
     # ── 1. Table-4-style report ──────────────────────────────────────────────
     upward = float(tail["upward_silence_rate"].mean())

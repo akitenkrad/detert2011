@@ -10,6 +10,8 @@ dependencies = [
     "pillow>=10.0",
     "scipy>=1.11",
     "socsim-tools",
+    # run ディレクトリの読み方は runvault が持つ (read 側は pandas を使うので extra)．
+    "runvault[read]",
     # CFA-style fit-index reproduction from the ABM rule-firing matrix.
     "factor-analyzer>=0.5",
 ]

@@ -29,7 +29,7 @@ LLM output is **outside** socsim's bit-reproducibility, so the design splits int
 - **Deterministic socsim core** — employee initialisation, Watts–Strogatz network generation, scheduling, the eight non-decision mechanisms, and both rule-mode logits. Given a seed this reproduces bit-for-bit.
 - **Non-deterministic LLM layer** — the `voice_decision` mechanism only. Pseudo-determinised by `socsim-llm`'s `CachingClient` (a `hash(prompt+model)` → response cache), `temperature=0`, and a fixed `(agent_id, t)`-derived seed. The cache — not the model — is the reproducibility mechanism: a warm cache replays identical responses.
 
-Each run writes `llm_meta.json` recording mode / model / endpoint / temperature / seed / cache-hit rate.
+Each run is recorded with [runvault](https://github.com/akitenkrad/rs-runvault): the mode and seeds sit in `config.json`, the model and endpoint in `run.json`'s `llm` block, and the call / cache-hit counts among the run-scope metrics of `metrics.csv`.
 
 ## Install & Quick start
 
@@ -69,7 +69,7 @@ cargo run --release -- reproduce --llm-mode rule --t-max 60 --runs 30
 uv sync
 uv run detert-tools visualize                 # silence series + IVT rule heatmap + scatter
 uv run detert-tools visualize-sweep           # β_ι × ψ̄ phase diagram
-uv run detert-tools show-experiment-settings  # config / sweep_config / llm_meta
+uv run detert-tools show-experiment-settings  # parameters / llm block / run metrics
 uv run detert-tools reproduce                 # Table-4-style report + CFA-style fit indices
 ```
 
@@ -78,7 +78,7 @@ uv run detert-tools reproduce                 # Table-4-style report + CFA-style
 ```
 detert2011/
 ├── simulation/                       # Rust socsim ABM
-│   ├── Cargo.toml                    # socsim-{core,engine,net,llm,results} git deps
+│   ├── Cargo.toml                    # socsim-{core,engine,net,llm} + runvault git deps
 │   ├── src/
 │   │   ├── lib.rs / main.rs          # CLI: run / sweep / ablation / reproduce
 │   │   ├── config.rs                 # Config / LlmMode / BetaGroup / NetworkKind
@@ -86,21 +86,26 @@ detert2011/
 │   │   ├── mechanisms.rs             # 9 mechanisms × 6 phases; rule vs LLM decision (exclusive)
 │   │   ├── prompts.rs                # IVT 5-rule self-reflection prompt + decision JSON parser
 │   │   ├── llm.rs                    # socsim-llm shared-harness re-export shim
-│   │   ├── simulation.rs             # init_world + run_with_client + CSV/JSON writers
+│   │   ├── simulation.rs             # init_world + run_with_client
+│   │   ├── record.rs                 # runvault: paper metadata, wide→long metrics, events
 │   │   └── metrics.rs                # upward_silence / rule_activation / co-occurrence / corr
 │   └── tests/integration_test.rs     # rule bit-determinism + scripted-LLM smoke
 ├── tools/                            # Python detert-tools
-│   └── src/detert_tools/{cli,visualize,visualize_sweep,show_experiment_settings,
-│                         reproduce_paper}.py
+│   └── src/detert_tools/{cli,run_io,visualize,visualize_sweep,
+│                         show_experiment_settings,reproduce_paper}.py
 ├── docs/                             # bilingual: architecture, cli, usecases, visualization, reproduction
 └── results/                          # runtime outputs (gitignored)
-    ├── latest -> {YYYYMMDD_HHMMSS}/
-    └── {YYYYMMDD_HHMMSS}/
-        ├── config.json | sweep_config.json
-        ├── metrics.csv               # t, upward_silence_rate, rule_*, max_rule_cooccurrence, …
-        ├── agents.csv                # final-step per-agent state + active_rules
-        ├── rule_activation.csv       # per-step per-rule firing share
-        └── llm_meta.json             # LLM provenance + cache-hit + silence_voice_corr
+    └── detert/                       # runvault: <experiment>/<run_slug>/
+        ├── run_{stamp}_{hashes}/     # one subcommand invocation = one run
+        │   ├── run.json              # ids, code+env, seeds, llm block, paper targets
+        │   ├── config.json           # the condition, under `parameters`
+        │   ├── metrics.csv           # long: run_uid,step,step_unit,scope,name,value
+        │   ├── events.jsonl          # ablation trials / reproduce checks
+        │   ├── artifacts/agents.csv  # final-step per-agent state + active_rules
+        │   ├── manifest.csv          # blake3 of everything under artifacts/
+        │   └── status.json           # state, duration_sec, counts
+        ├── sweep_{stamp}_{hashes}/   # sweep parent (children are `run_*` beside it)
+        └── figures/<run_slug>/       # what the Python tools draw, outside the run
 ```
 
 ## Documentation

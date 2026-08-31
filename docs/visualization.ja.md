@@ -2,37 +2,39 @@
 
 [English](visualization.md) | [日本語](visualization.ja.md)
 
-Python `detert-tools` パッケージは results ディレクトリを読み，PNG を描画する．`uv sync` でインストールし，任意のサブコマンドを実行する．
+Python `detert-tools` パッケージは runvault の run ディレクトリを読み，PNG を描画する．`uv sync` でインストールし，任意のサブコマンドを実行する．
+
+`--results-dir` を省略した場合は `runvault path` が対象の run を返す．図は run の外，`<results-root>/detert/figures/<run_slug>/` に書く — `manifest.csv` は `finish()` が確定させるので，後から足したものには hash が付かないためである．移行前に書かれたディレクトリもそのまま読める．
 
 ## `visualize`
 
-`metrics.csv` / `rule_activation.csv` / `agents.csv` からの単一実行プロット：
+`metrics.csv` と `artifacts/agents.csv` からの単一実行プロット：
 
 - **silence_timeseries.png** — ステップ別の upward silence rate・silence rate・climate of silence と HiCo .50 アンカー線．
-- **rule_firing_heatmap.png** — 5 つの IVT ルールの活性化率 `a_r` の時間推移ヒートマップ．
+- **rule_firing_heatmap.png** — 5 つの IVT ルールの活性化率 `a_r` の時間推移ヒートマップ（`rule_*` 指標から描く．旧 `rule_activation.csv` と同じ数）．
 - **silence_voice_scatter.png** — 最終ステップの表明（VOICE / SILENCE / NEUTRAL）を IVT 強度 ι × 私的懸念 b 上にプロット．
 
 ```bash
-uv run detert-tools visualize --results-dir results/latest
+uv run detert-tools visualize            # または --results-dir <run>
 ```
 
 ## `visualize-sweep`
 
-`sweep_summary.csv` からのスイーププロット：
+掃引の子 run から組み直した表によるスイーププロット（runvault は `sweep_summary.csv` を持たない）：
 
 - **sweep_phase_diagram.png** — β_ι × ψ̄ グリッド上の平均 upward silence rate（ヒートマップ）．
 - **sweep_beta_ivt_curve.png** — β_ι に対する upward silence（ψ̄ ごとに 1 線），HiCo .50 アンカー付き．
 
 ```bash
-uv run detert-tools visualize-sweep --results-dir results/<ts>_sweep
+uv run detert-tools visualize-sweep      # または --results-dir <sweep run>
 ```
 
 ## `show-experiment-settings`
 
-`config.json`（run）または `sweep_config.json`（sweep / ablation）と `llm_meta.json` を整形表示する．`--json` で機械可読 JSON を出力．
+run の `parameters`，`run.json` の `llm` ブロック，run スコープ指標を整形表示する．`--json` で機械可読 JSON を出力．`--subcommand` でどの種別の run を解決するかを選ぶ（`run` / `sweep` / `ablation` / `reproduce`）．
 
 ```bash
-uv run detert-tools show-experiment-settings --results-dir results/latest
+uv run detert-tools show-experiment-settings   # または --results-dir <run>
 ```
 
 ## `reproduce`

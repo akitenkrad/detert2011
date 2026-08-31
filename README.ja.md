@@ -29,7 +29,7 @@ LLM 出力は socsim の bit 再現性の **外側** にあるため，設計を
 - **決定論的 socsim コア** — 従業員初期化，Watts–Strogatz ネットワーク生成，スケジューリング，8 つの非意思決定機構，両 rule ロジット．seed を固定すれば bit 単位で再現する．
 - **非決定的 LLM レイヤ** — `voice_decision` 機構のみ．`socsim-llm` の `CachingClient`（`hash(prompt+model)` → 応答キャッシュ）・`temperature=0`・`(agent_id, t)` 由来の固定 seed で擬似決定論化する．モデルではなくキャッシュが再現性の機構であり，warm cache は同一応答を再生する．
 
-各実行は `llm_meta.json` に mode / model / endpoint / temperature / seed / cache-hit 率を記録する．
+各実行は [runvault](https://github.com/akitenkrad/rs-runvault) の run として記録される．モードとシードは `config.json`，モデルと endpoint は `run.json` の `llm` ブロック，呼び出し回数と cache-hit は `metrics.csv` の run スコープ指標が持つ．
 
 ## インストール & クイックスタート
 
@@ -69,7 +69,7 @@ cargo run --release -- reproduce --llm-mode rule --t-max 60 --runs 30
 uv sync
 uv run detert-tools visualize                 # 沈黙率時系列 + IVT ルールヒートマップ + 散布
 uv run detert-tools visualize-sweep           # β_ι × ψ̄ 相図
-uv run detert-tools show-experiment-settings  # config / sweep_config / llm_meta
+uv run detert-tools show-experiment-settings  # parameters / llm ブロック / run 指標
 uv run detert-tools reproduce                 # Table 4 風レポート + CFA 系適合度指標
 ```
 
@@ -78,7 +78,7 @@ uv run detert-tools reproduce                 # Table 4 風レポート + CFA �
 ```
 detert2011/
 ├── simulation/                       # Rust socsim ABM
-│   ├── Cargo.toml                    # socsim-{core,engine,net,llm,results} git 依存
+│   ├── Cargo.toml                    # socsim-{core,engine,net,llm} + runvault git 依存
 │   ├── src/
 │   │   ├── lib.rs / main.rs          # CLI: run / sweep / ablation / reproduce
 │   │   ├── config.rs                 # Config / LlmMode / BetaGroup / NetworkKind
@@ -86,21 +86,26 @@ detert2011/
 │   │   ├── mechanisms.rs             # 9 機構 × 6 フェーズ；rule vs LLM 決定（排他）
 │   │   ├── prompts.rs                # IVT 5 ルール内省プロンプト + 決定 JSON パーサ
 │   │   ├── llm.rs                    # socsim-llm 共有ハーネス re-export shim
-│   │   ├── simulation.rs             # init_world + run_with_client + CSV/JSON ライタ
+│   │   ├── simulation.rs             # init_world + run_with_client
+│   │   ├── record.rs                 # runvault: 論文メタ・wide→long 指標・イベント
 │   │   └── metrics.rs                # upward_silence / rule_activation / 同時発火 / 相関
 │   └── tests/integration_test.rs     # rule bit 決定論 + scripted-LLM スモーク
 ├── tools/                            # Python detert-tools
-│   └── src/detert_tools/{cli,visualize,visualize_sweep,show_experiment_settings,
-│                         reproduce_paper}.py
+│   └── src/detert_tools/{cli,run_io,visualize,visualize_sweep,
+│                         show_experiment_settings,reproduce_paper}.py
 ├── docs/                             # bilingual: architecture, cli, usecases, visualization, reproduction
 └── results/                          # 実行時生成（gitignore）
-    ├── latest -> {YYYYMMDD_HHMMSS}/
-    └── {YYYYMMDD_HHMMSS}/
-        ├── config.json | sweep_config.json
-        ├── metrics.csv               # t, upward_silence_rate, rule_*, max_rule_cooccurrence, …
-        ├── agents.csv                # 最終ステップの per-agent 状態 + active_rules
-        ├── rule_activation.csv       # ステップ別ルール別発火率
-        └── llm_meta.json             # LLM 来歴 + cache-hit + silence_voice_corr
+    └── detert/                       # runvault: <experiment>/<run_slug>/
+        ├── run_{stamp}_{hashes}/     # サブコマンド 1 回 = run 1 本
+        │   ├── run.json              # id・コードと環境・シード・llm ブロック・論文の対象
+        │   ├── config.json           # 条件（`parameters` の下）
+        │   ├── metrics.csv           # long: run_uid,step,step_unit,scope,name,value
+        │   ├── events.jsonl          # ablation の試行 / reproduce の帯照合
+        │   ├── artifacts/agents.csv  # 最終ステップの per-agent 状態 + active_rules
+        │   ├── manifest.csv          # artifacts/ 配下の blake3
+        │   └── status.json           # 状態・duration_sec・件数
+        ├── sweep_{stamp}_{hashes}/   # 掃引の親（子は隣の `run_*`）
+        └── figures/<run_slug>/       # Python ツールが描くもの．run の外に置く
 ```
 
 ## ドキュメント

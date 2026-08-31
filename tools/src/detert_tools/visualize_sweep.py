@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """visualize_sweep.py — sweep visualization for the Detert 2011 IVT silence model.
 
-Reads `results/<timestamp>_sweep/sweep_summary.csv` and produces:
+Reads a sweep parent run and produces:
   - sweep_phase_diagram.png  : β_ι × ψ̄ heatmap of mean upward silence rate
   - sweep_beta_ivt_curve.png : upward silence vs β_ι (one line per ψ̄), with the
                                HiCo .50 anchor marked
 
+セルごとの値は子 run にあり，runvault は `sweep_summary.csv` をディスクに持たない．
+表は `run_io.sweep_table` が子から組み直す．--results-dir を省略すると
+`runvault path --experiment detert --latest --subcommand sweep` が返す run を使う．
+
 Usage:
     uv run detert-tools visualize-sweep
-    uv run detert-tools visualize-sweep --results-dir results/<ts>_sweep
+    uv run detert-tools visualize-sweep --results-dir <sweep run>
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import os
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+from detert_tools.run_io import latest_run, output_dir as default_output_dir, sweep_table
 
 COLOR_BG = "#FAFAF8"
 LINE_COLORS = ["#534AB7", "#4C97C9", "#0F6E56", "#F4A259", "#B5546A"]
@@ -78,17 +84,18 @@ def plot_beta_ivt_curve(df: pd.DataFrame, output_dir: str) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="detert-tools visualize-sweep")
-    parser.add_argument("--results-dir", default="results/latest")
-    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--results-dir", "--results_dir", default=None)
+    parser.add_argument("--results-root", "--results_root", default="results")
+    parser.add_argument("--output-dir", "--output_dir", default=None)
     args = parser.parse_args(argv)
-    results_dir = args.results_dir
-    output_dir = args.output_dir or results_dir
+
+    results_dir = args.results_dir or latest_run(
+        results_root=args.results_root, subcommand="sweep", standalone=False
+    )
+    output_dir = args.output_dir or default_output_dir(results_dir)
     os.makedirs(output_dir, exist_ok=True)
-    sweep_path = os.path.join(results_dir, "sweep_summary.csv")
-    if not os.path.exists(sweep_path):
-        print(f"[visualize-sweep] no sweep summary at {sweep_path}; nothing to plot")
-        return
-    df = pd.read_csv(sweep_path)
+    print(f"[visualize-sweep] sweep: {results_dir}")
+    df = sweep_table(results_dir)
     plot_phase_diagram(df, output_dir)
     plot_beta_ivt_curve(df, output_dir)
 

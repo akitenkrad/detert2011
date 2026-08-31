@@ -21,7 +21,7 @@ use socsim_llm::{LlmClient, MetadataCollector};
 use socsim_net::SocialNetwork;
 
 use crate::config::{Config, LlmMode, NetworkKind};
-use crate::llm::{build_live_client, SilenceClient};
+use crate::llm::SilenceClient;
 use crate::mechanisms::{
     ClimateSilence, FearAppraisal, IssueSalience, OrgPerformance, PrefalseCascade, PsafetyUpdate,
     RetaliationEvent, SharedClient, SharedMetadata, SilenceSpiral, VoiceDecisionLlm,
@@ -50,7 +50,8 @@ const CONVERGENCE_WINDOW: u64 = 5;
 // Result containers + per-step row
 // --------------------------------------------------------------------------- //
 
-/// Per-step metrics row written to `metrics.csv`.
+/// Per-step aggregate row. Written to the run's `metrics.csv` in long form
+/// (one metric per row) by [`crate::record::log_simulation`].
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsRow {
     pub t: u64,
@@ -67,7 +68,8 @@ pub struct MetricsRow {
     pub max_rule_cooccurrence: f64,
 }
 
-/// Per-agent end-of-run state row written to `agents.csv`.
+/// Per-agent end-of-run state row, written to the run's `artifacts/agents.csv`
+/// by [`crate::record::save_agents`].
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentRow {
     pub t: u64,
@@ -86,7 +88,9 @@ pub struct AgentRow {
     pub ever_silent: bool,
 }
 
-/// Per-(t, rule) activation row written to `rule_activation.csv`.
+/// Per-(t, rule) activation row. The five shares are the same numbers as
+/// [`MetricsRow`]'s `rule_*` fields, so they are no longer written to a file of
+/// their own — the long-form `metrics.csv` already carries them per step.
 #[derive(Debug, Clone, Serialize)]
 pub struct RuleActivationRow {
     pub t: u64,
@@ -185,21 +189,12 @@ pub fn init_world(cfg: &Config, rng: &mut SimRng) -> SilenceWorld {
 // Run driver
 // --------------------------------------------------------------------------- //
 
-/// Build mechanisms + run one configuration. For `llm_mode = Llm`, build the
-/// production LLM client from the environment.
-pub fn run(cfg: &Config) -> std::result::Result<SimulationResult, String> {
-    if cfg.llm_mode.is_llm() {
-        let client =
-            build_live_client(&cfg.llm).map_err(|e| format!("LLM client build failed: {e}"))?;
-        run_with_client(cfg, Some(client))
-    } else {
-        run_with_client(cfg, None)
-    }
-}
-
-/// Run with an optional pre-built [`SilenceClient`] — production via
-/// [`build_live_client`], tests via [`crate::llm::wrap_client`] over a
-/// `ScriptedClient`.
+/// Build mechanisms + run one configuration with a pre-built [`SilenceClient`]
+/// — production via [`crate::llm::build_live_client`], tests via [`crate::llm::wrap_client`]
+/// over a `ScriptedClient`; `None` for the rule modes, which make no LLM calls.
+///
+/// The client is built by the caller on purpose: the model name and endpoint
+/// written to the run's `llm` block are only known to whoever built it.
 pub fn run_with_client(
     cfg: &Config,
     client: Option<SilenceClient>,
@@ -443,78 +438,6 @@ pub fn cohens_d(a: &[f64], b: &[f64]) -> f64 {
     } else {
         (ma - mb) / pooled
     }
-}
-
-// --------------------------------------------------------------------------- //
-// Output writers
-// --------------------------------------------------------------------------- //
-
-/// Create the output directory.
-pub fn ensure_output_dir(output_dir: &str) {
-    socsim_results::ensure_dir(output_dir).expect("failed to create output directory");
-}
-
-/// Write `metrics.csv` (one row per simulation step).
-pub fn save_metrics(result: &SimulationResult, output_dir: &str) {
-    let path = format!("{output_dir}/metrics.csv");
-    socsim_results::write_csv(&result.metrics_rows, &path).expect("failed to write metrics.csv");
-}
-
-/// Write `agents.csv` (one row per agent at the final step).
-pub fn save_agents(result: &SimulationResult, output_dir: &str) {
-    let path = format!("{output_dir}/agents.csv");
-    socsim_results::write_csv(&result.agent_rows, &path).expect("failed to write agents.csv");
-}
-
-/// Write `rule_activation.csv` (per-step per-rule firing share).
-pub fn save_rule_activation(result: &SimulationResult, output_dir: &str) {
-    let path = format!("{output_dir}/rule_activation.csv");
-    socsim_results::write_csv(&result.rule_activation_rows, &path)
-        .expect("failed to write rule_activation.csv");
-}
-
-/// `llm_meta.json` (LLM model / endpoint / temperature / seed / cache stats).
-#[derive(Serialize)]
-pub struct LlmMetaJson {
-    pub llm_mode: String,
-    pub llm_model: String,
-    pub llm_endpoint: String,
-    pub llm_temperature: f32,
-    pub llm_seed: u64,
-    pub total_calls: usize,
-    pub cache_hits: usize,
-    pub cache_hit_rate: f64,
-    pub final_round: u64,
-    pub convergence_step: Option<u64>,
-    pub ever_silent_fraction: f64,
-    /// Time-averaged per-agent silence↔voice correlation (Study 4 r ≈ −.55).
-    pub silence_voice_corr: f64,
-    pub determinism_note: &'static str,
-}
-
-/// Save `llm_meta.json`.
-pub fn save_llm_meta(result: &SimulationResult, cfg: &Config, output_dir: &str) {
-    let meta = LlmMetaJson {
-        llm_mode: cfg.llm_mode.label().to_string(),
-        llm_model: result.llm_model.clone(),
-        llm_endpoint: result.llm_endpoint.clone(),
-        llm_temperature: cfg.llm.temperature,
-        llm_seed: cfg.llm.seed,
-        total_calls: result.metadata.total(),
-        cache_hits: result.metadata.cache_hits(),
-        cache_hit_rate: result.metadata.cache_hit_rate(),
-        final_round: result.final_round,
-        convergence_step: result.convergence_step,
-        ever_silent_fraction: result.ever_silent_fraction,
-        silence_voice_corr: result.silence_voice_corr_timeavg,
-        determinism_note: "LLM output is outside socsim bit-reproducibility; the prompt->response \
-                           cache (temperature=0 + (agent_id, t)-derived seed) is the reproducibility \
-                           mechanism. The socsim core (employee init, network, scheduling, the 8 \
-                           non-LLM mechanisms, the rule decision modes) is deterministic given the \
-                           seed. rule / rule_no_ivt make zero LLM calls.",
-    };
-    let path = format!("{output_dir}/llm_meta.json");
-    socsim_results::write_json(&meta, &path).expect("failed to write llm_meta.json");
 }
 
 #[cfg(test)]

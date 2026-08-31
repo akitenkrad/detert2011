@@ -188,9 +188,6 @@ pub struct Config {
 
     // ── LLM settings (used iff `llm_mode == Llm`) ──────────────────────────
     pub llm: LlmSettings,
-
-    // ── output ─────────────────────────────────────────────────────────────
-    pub output_dir: String,
 }
 
 impl Default for Config {
@@ -214,7 +211,6 @@ impl Default for Config {
             runs: 1,
             seed: 42,
             llm: LlmSettings::default(),
-            output_dir: "results".to_string(),
         }
     }
 }
@@ -239,10 +235,11 @@ impl Config {
     }
 }
 
-/// JSON representation of a `run`'s `config.json`.
+/// The experimental condition, written to the run directory's `config.json`
+/// under `parameters`. Which subcommand produced it is `run.json`'s business,
+/// and the run directory *is* the output location, so neither is repeated here.
 #[derive(Serialize)]
 pub struct RunConfigJson {
-    pub command: &'static str,
     pub n_teams: usize,
     pub team_size: usize,
     pub n_levels: u8,
@@ -264,14 +261,12 @@ pub struct RunConfigJson {
     pub llm_temperature: f32,
     pub llm_seed: u64,
     pub llm_cache_path: Option<String>,
-    pub output_dir: String,
 }
 
 impl Config {
     /// Build the `config.json` representation.
     pub fn to_run_config_json(&self) -> RunConfigJson {
         RunConfigJson {
-            command: "run",
             n_teams: self.n_teams,
             team_size: self.team_size,
             n_levels: self.n_levels,
@@ -293,7 +288,6 @@ impl Config {
             llm_temperature: self.llm.temperature,
             llm_seed: self.llm.seed,
             llm_cache_path: self.llm.cache_path.clone(),
-            output_dir: self.output_dir.clone(),
         }
     }
 }

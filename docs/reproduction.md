@@ -6,7 +6,7 @@
 
 ```bash
 cargo run --release -- run --llm-mode rule --t-max 60 --runs 1 --seed 42
-uv run detert-tools reproduce --results-dir results/latest
+uv run detert-tools reproduce
 ```
 
 ## 1. Table-4-style report (`table4_report.csv`)
@@ -19,7 +19,7 @@ Steady-state means over the second half of the run, checked against the paper's 
 | `silence_voice_corr` | r = −.55 (Study 4) | within [−.65, −.45] |
 | most-frequent IVT rule | "need solid data" (Study 2) | `need_data` is the top rule |
 
-The silence–voice correlation is the run-level **time-averaged** per-agent value (written to `llm_meta.json` as `silence_voice_corr`): the per-step value in `metrics.csv` is the within-step VOICE/SILENCE snapshot (a hard dichotomy → −1), whereas the construct the paper reports is the graded overlap between distinct silence and voice tendencies.
+The silence–voice correlation is the run-level **time-averaged** per-agent value (the run-scope metric `silence_voice_corr_timeavg`): the per-step value in `metrics.csv` is the within-step VOICE/SILENCE snapshot (a hard dichotomy → −1), whereas the construct the paper reports is the graded overlap between distinct silence and voice tendencies.
 
 ## 2. CFA-style fit indices (`cfa_fit_indices.csv`)
 

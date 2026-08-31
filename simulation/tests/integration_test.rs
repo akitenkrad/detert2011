@@ -31,7 +31,6 @@ fn small_cfg(mode: LlmMode) -> Config {
         runs: 1,
         seed: 1234,
         llm: LlmSettings::default(),
-        output_dir: "results".to_string(),
         ..Config::default()
     }
 }
