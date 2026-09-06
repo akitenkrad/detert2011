@@ -23,7 +23,7 @@ use detert_silence::config::{
 };
 use detert_silence::llm::{build_live_client, SilenceClient};
 use detert_silence::record::{self, AblationTrial, Check, DOMAIN, EXPERIMENT, REPO_ID};
-use detert_silence::simulation::{cohens_d, run_with_client, SimulationResult};
+use detert_silence::simulation::{cohens_d, run_with_client_observed, SimulationResult};
 
 use socsim_core::derive_seed;
 
@@ -394,8 +394,13 @@ fn cmd_run(args: RunArgs) {
     println!("出力先: {}", rv.dir().display());
     println!("----------------------------------------------------------------------");
 
+    // 進捗の 1 単位は 1 ステップ．費用がそこにあるからで，1 ステップは全従業員に
+    // ついて決定を出し，LLM モードではその 1 つ 1 つがモデル呼び出しになる．
+    // 試行を単位にすると，ライブの 1 本は 0/1 と出したきり終わりまで黙る．
+    // 試行はすべて同じ t_max・同じ規模なので重みではなく数える．
     let mut last_result: Option<SimulationResult> = None;
     let runs = base_cfg.runs.max(1);
+    let mut stage = rv.stage("steps", runs * base_cfg.t_max as usize);
     for run_idx in 0..runs {
         let seed = derive_seed(base_cfg.seed, &[run_idx as u64]);
         let cfg = Config {
@@ -403,7 +408,8 @@ fn cmd_run(args: RunArgs) {
             ..base_cfg.clone()
         };
         let client = pending.take().or_else(|| build_client(&cfg));
-        let result = run_with_client(&cfg, client).unwrap_or_else(|e| panic!("run failed: {e}"));
+        let result = run_with_client_observed(&cfg, client, |_| stage.tick())
+            .unwrap_or_else(|e| panic!("run failed: {e}"));
         println!(
             "[{}/{}] seed={} upward_silence={:.3} silence_voice_r={:.3} max_cooc={:.3} conv={:?}",
             run_idx + 1,
@@ -420,6 +426,9 @@ fn cmd_run(args: RunArgs) {
         );
         last_result = Some(result);
     }
+    // manifest.csv は finish() で封をされる．その後に 1 行足せば，manifest が
+    // 食い違うダイジェストを持つことになる．
+    stage.close();
 
     // 記録するのは最後の試行 — 移行前も `metrics.csv` / `agents.csv` は最後の試行
     // のものだった．`runs` は parameters にあるので，何本目を記録したかは辿れる．
@@ -504,6 +513,11 @@ fn cmd_sweep(args: SweepArgs) {
     println!("出力先: {}", parent.dir().display());
     println!("------------------------------------------------------------");
 
+    // グリッド全体で stage を 1 つ．条件ごとに開け直すと小さな 100% が並ぶだけで，
+    // スイープ全体のどこにいるかは分からない．掃引しているのは β_ι と ψ̄ の係数で，
+    // どちらも仕事の量を変えない (チーム数も t_max も固定) ので，重みではなく数える．
+    let mut stage = parent.stage("steps", n_total * args.t_max as usize);
+
     let mut idx = 0usize;
     for &bivt in &beta_ivt_vals {
         for &psi in &psafety_vals {
@@ -564,7 +578,7 @@ fn cmd_sweep(args: SweepArgs) {
                 }
                 let mut child = Run::start(options).expect("runvault: 子 run の開始に失敗");
 
-                let result = run_with_client(&cfg, client)
+                let result = run_with_client_observed(&cfg, client, |_| stage.tick())
                     .unwrap_or_else(|e| panic!("sweep run failed: {e}"));
                 record::log_simulation(&mut child, &result);
                 record::save_agents(&child, &result);
@@ -583,6 +597,8 @@ fn cmd_sweep(args: SweepArgs) {
             }
         }
     }
+
+    stage.close();
 
     let dir = parent
         .finish()
@@ -658,7 +674,15 @@ fn cmd_ablation(args: AblationArgs) {
 
     let mut per_mode: std::collections::BTreeMap<String, Vec<f64>> =
         std::collections::BTreeMap::new();
+    let n_seeds = (args.seed_end + 1).saturating_sub(args.seed_start) as usize;
     for &mode in &modes {
+        // モードごとに別の stage にする．LLM モードと rule_* では 1 ステップの
+        // 費用が桁で違う (前者は従業員 1 人ごとにモデル呼び出し，後者は算術だけ)
+        // ので，1 つの stage にまとめると数からの外挿が «自信をもって外れた
+        // 見積もり» になる．その比を重みで書くこともできない — 比はエンドポイント・
+        // モデル・キャッシュの当たり方で決まり，走らせる前には誰も知らない．
+        // 分ければ stage の中の 1 ステップはすべて同じ費用になる．
+        let mut stage = rv.stage(mode.label(), n_seeds * args.t_max as usize);
         for seed in args.seed_start..=args.seed_end {
             let cfg = Config {
                 n_teams: args.n_teams,
@@ -674,7 +698,7 @@ fn cmd_ablation(args: AblationArgs) {
             } else {
                 None
             };
-            let result = run_with_client(&cfg, client)
+            let result = run_with_client_observed(&cfg, client, |_| stage.tick())
                 .unwrap_or_else(|e| panic!("ablation run failed: {e}"));
             let last = result.metrics_rows.last().expect("metrics");
             per_mode
@@ -692,6 +716,7 @@ fn cmd_ablation(args: AblationArgs) {
                 },
             );
         }
+        stage.close();
     }
 
     println!("------------------------------------------------------------");
@@ -766,7 +791,9 @@ fn cmd_reproduce(args: ReproduceArgs) {
     let mut up = Vec::new();
     let mut sv = Vec::new();
     let mut cooc = Vec::new();
-    for run_idx in 0..args.runs.max(1) {
+    let runs = args.runs.max(1);
+    let mut stage = rv.stage("steps", runs * args.t_max as usize);
+    for run_idx in 0..runs {
         let seed = derive_seed(args.seed, &[run_idx as u64]);
         let cfg = Config {
             n_teams: args.n_teams,
@@ -782,13 +809,14 @@ fn cmd_reproduce(args: ReproduceArgs) {
         } else {
             None
         };
-        let result =
-            run_with_client(&cfg, client).unwrap_or_else(|e| panic!("reproduce run failed: {e}"));
+        let result = run_with_client_observed(&cfg, client, |_| stage.tick())
+            .unwrap_or_else(|e| panic!("reproduce run failed: {e}"));
         let last = result.metrics_rows.last().expect("metrics");
         up.push(last.upward_silence_rate);
         sv.push(result.final_silence_voice_corr());
         cooc.push(last.max_rule_cooccurrence);
     }
+    stage.close();
 
     let mu = mean(&up);
     let msv = mean(&sv);
