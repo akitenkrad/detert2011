@@ -1,3 +1,208 @@
-# Metric descriptions are not written yet (MYTASK-3382). Until they are,
-# runvault records undeclared metrics instead of refusing them.
-require_docs = false
+# 指標が何を測っているか (runvault の宣言．rs-runvault docs/metrics.ja.md)．
+#
+# 名前は `simulation/src/record.rs` と `simulation/src/main.rs` が書いているものと
+# 一致していなければならない．`<mode>_*` は `llm` / `rule` / `rule_no_ivt` の
+# 3 モードについて `format!` で生成されるが，取りうる名前はここで個別に宣言する．
+#
+# 沈黙率・ルール発火率・相関は模型の記述量なので `direction = "none"` とする．
+
+# --- ステップごと (scope=run, step=t) -------------------------------------
+
+[metrics."silence_rate"]
+meaning   = "そのステップで沈黙を選んだ従業員の割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."upward_silence_rate"]
+meaning   = "上位者へ伝える懸念を持つ従業員のうち沈黙した者の割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."climate_of_silence"]
+meaning   = "組織全体で知覚された沈黙風土の平均"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."silence_voice_corr"]
+meaning   = "そのステップの従業員別沈黙指標と発言指標の Pearson 相関"
+unit      = "correlation"
+direction = "none"
+range     = [-1.0, 1.0]
+scope     = ["run"]
+
+[metrics."issue_salience"]
+meaning   = "そのステップにおける組織課題の顕著性"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_target_id"]
+meaning   = "沈黙者のうち，上司が発言を個人攻撃と受け取るという IVT ルールが発火した割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_need_data"]
+meaning   = "沈黙者のうち，発言前に確かなデータや完成案が必要だという IVT ルールが発火した割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_no_bypass"]
+meaning   = "沈黙者のうち，直属上司を飛び越えてはならないという IVT ルールが発火した割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_no_embarrass"]
+meaning   = "沈黙者のうち，人前で上司を困らせてはならないという IVT ルールが発火した割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_career_consq"]
+meaning   = "沈黙者のうち，発言が負のキャリア結果を招くという IVT ルールが発火した割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."max_rule_cooccurrence"]
+meaning   = "異なる IVT ルール対の同時発火率の最大値"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+# --- run 全体と LLM の呼び出し -------------------------------------------
+
+[metrics."final_round"]
+meaning   = "停止したときの最終ラウンド番号"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."converged"]
+meaning   = "状態変化が収束しきい値内に入って停止したなら 1，打ち切りなら 0"
+unit      = "boolean"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."ever_silent_fraction"]
+meaning   = "run 中に一度以上沈黙した従業員の割合"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."silence_voice_corr_timeavg"]
+meaning   = "従業員ごとの時間平均沈黙傾性と時間平均発言率の Pearson 相関"
+unit      = "correlation"
+direction = "none"
+range     = [-1.0, 1.0]
+scope     = ["run"]
+
+[metrics."convergence_step"]
+meaning   = "状態変化が収束しきい値内に初めて入ったステップ"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."llm_calls"]
+meaning   = "この run が行った LLM の呼び出し回数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."llm_cache_hits"]
+meaning   = "LLM 呼び出しのうちキャッシュで応答した回数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."llm_cache_hit_rate"]
+meaning   = "LLM 呼び出しのうちキャッシュで応答した割合"
+unit      = "ratio"
+direction = "up"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+# --- ablation のモード別集約 ----------------------------------------------
+
+[metrics."llm_mean_upward_silence_rate"]
+meaning   = "LLM モードの試行群にわたる最終上方沈黙率の平均"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."llm_n_trials"]
+meaning   = "LLM モードで集約した試行数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."rule_mean_upward_silence_rate"]
+meaning   = "IVT 項を含む rule モードの試行群にわたる最終上方沈黙率の平均"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_n_trials"]
+meaning   = "IVT 項を含む rule モードで集約した試行数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."rule_no_ivt_mean_upward_silence_rate"]
+meaning   = "IVT 項を除いた rule_no_ivt モードの試行群にわたる最終上方沈黙率の平均"
+unit      = "ratio"
+direction = "none"
+range     = [0.0, 1.0]
+scope     = ["run"]
+
+[metrics."rule_no_ivt_n_trials"]
+meaning   = "IVT 項を除いた rule_no_ivt モードで集約した試行数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
+
+[metrics."ivt_effect_delta"]
+meaning   = "rule モードの平均上方沈黙率から rule_no_ivt モードの平均を引いた差"
+unit      = "ratio"
+direction = "none"
+range     = [-1.0, 1.0]
+scope     = ["run"]
+
+[metrics."ivt_effect_cohens_d"]
+meaning   = "rule と rule_no_ivt の上方沈黙率差に対する Cohen's d"
+unit      = "standardized_effect"
+direction = "none"
+scope     = ["run"]
+
+# --- reproduce の帯照合 ----------------------------------------------------
+
+[metrics."checks_passed"]
+meaning   = "設計アンカーの許容帯に収まった観測量の数"
+unit      = "count"
+direction = "up"
+scope     = ["run"]
+
+[metrics."checks_total"]
+meaning   = "照合した設計アンカーの総数"
+unit      = "count"
+direction = "none"
+scope     = ["run"]
