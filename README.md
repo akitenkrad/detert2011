@@ -73,6 +73,11 @@ uv run detert-tools show-experiment-settings  # parameters / llm block / run met
 uv run detert-tools reproduce                 # Table-4-style report + CFA-style fit indices
 ```
 
+
+## Scratch runs
+
+Use `--scratch` for development, debugging, and smoke-test runs. Scratch runs are created under `results/_scratch/`, are never synced to the vault, and the latest scratch run can be located with `runvault path --scratch`.
+
 ## Repository layout
 
 ```

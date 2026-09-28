@@ -39,6 +39,9 @@ use socsim_core::derive_seed;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    /// Development run: write it under results/_scratch/ so it is never synced to the vault.
+    #[arg(long, global = true)]
+    scratch: bool,
     /// Ollama 接続先 URL（指定時は環境変数 OLLAMA_HOST を上書きする）．
     #[arg(long, global = true)]
     ollama_host: Option<String>,
@@ -340,7 +343,7 @@ fn cfg_from_run_args(args: &RunArgs) -> Config {
 // run
 // --------------------------------------------------------------------------- //
 
-fn cmd_run(args: RunArgs) {
+fn cmd_run(args: RunArgs, scratch: bool) {
     let base_cfg = cfg_from_run_args(&args);
     if base_cfg.llm_mode.is_llm() {
         if let Some(parent) = Path::new(&args.cache_path).parent() {
@@ -356,6 +359,7 @@ fn cmd_run(args: RunArgs) {
 
     let parameters = base_cfg.to_run_config_json();
     let mut options = RunOptions::new(EXPERIMENT, "run")
+        .scratch(scratch)
         .repo_id(REPO_ID)
         .domain(DOMAIN)
         .results_root(&args.output_dir)
@@ -454,7 +458,7 @@ fn cmd_run(args: RunArgs) {
 // sweep
 // --------------------------------------------------------------------------- //
 
-fn cmd_sweep(args: SweepArgs) {
+fn cmd_sweep(args: SweepArgs, scratch: bool) {
     let llm_mode = parse_llm_mode(&args.llm_mode).unwrap_or_else(|e| panic!("{e}"));
 
     let mut beta_ivt_vals: Vec<f64> = Vec::new();
@@ -484,6 +488,7 @@ fn cmd_sweep(args: SweepArgs) {
     };
     let parent = Run::start(
         RunOptions::new(EXPERIMENT, "sweep")
+            .scratch(scratch)
             .repo_id(REPO_ID)
             .domain(DOMAIN)
             .results_root(&args.output_dir)
@@ -559,6 +564,7 @@ fn cmd_sweep(args: SweepArgs) {
                     psafety_mean: psi,
                 };
                 let mut options = RunOptions::new(EXPERIMENT, "run")
+                    .scratch(scratch)
                     .repo_id(REPO_ID)
                     .domain(DOMAIN)
                     .results_root(&args.output_dir)
@@ -613,7 +619,7 @@ fn cmd_sweep(args: SweepArgs) {
 // ablation
 // --------------------------------------------------------------------------- //
 
-fn cmd_ablation(args: AblationArgs) {
+fn cmd_ablation(args: AblationArgs, scratch: bool) {
     let modes: Vec<LlmMode> = args
         .modes
         .split([',', ' '])
@@ -647,6 +653,7 @@ fn cmd_ablation(args: AblationArgs) {
     let llm = llm_block_of(pending.as_ref(), probe_cfg.llm.temperature);
 
     let mut options = RunOptions::new(EXPERIMENT, "ablation")
+        .scratch(scratch)
         .repo_id(REPO_ID)
         .domain(DOMAIN)
         .results_root(&args.output_dir)
@@ -753,7 +760,7 @@ const HICO_TOL: f64 = 0.07;
 const SILENCE_VOICE_BAND: (f64, f64) = (-0.65, -0.45);
 const COOCCURRENCE_MAX: f64 = 0.50;
 
-fn cmd_reproduce(args: ReproduceArgs) {
+fn cmd_reproduce(args: ReproduceArgs, scratch: bool) {
     let mode = parse_llm_mode(&args.llm_mode).unwrap_or_else(|e| panic!("{e}"));
 
     let parameters = ReproduceConfigJson {
@@ -773,6 +780,7 @@ fn cmd_reproduce(args: ReproduceArgs) {
     let llm = llm_block_of(pending.as_ref(), probe_cfg.llm.temperature);
 
     let mut options = RunOptions::new(EXPERIMENT, "reproduce")
+        .scratch(scratch)
         .repo_id(REPO_ID)
         .domain(DOMAIN)
         .results_root(&args.output_dir)
@@ -891,13 +899,14 @@ fn cmd_reproduce(args: ReproduceArgs) {
 
 fn main() {
     let cli = Cli::parse();
+    let scratch = cli.scratch;
     if let Some(host) = cli.ollama_host.as_deref() {
         std::env::set_var("OLLAMA_HOST", host);
     }
     match cli.command {
-        Commands::Run(args) => cmd_run(args),
-        Commands::Sweep(args) => cmd_sweep(args),
-        Commands::Ablation(args) => cmd_ablation(args),
-        Commands::Reproduce(args) => cmd_reproduce(args),
+        Commands::Run(args) => cmd_run(args, scratch),
+        Commands::Sweep(args) => cmd_sweep(args, scratch),
+        Commands::Ablation(args) => cmd_ablation(args, scratch),
+        Commands::Reproduce(args) => cmd_reproduce(args, scratch),
     }
 }
